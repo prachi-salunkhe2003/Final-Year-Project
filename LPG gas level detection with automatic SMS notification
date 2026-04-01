@@ -1,0 +1,248 @@
+#include <LiquidCrystal.h>
+
+#define MQ6_PIN A0         
+#define DHT_PIN A3         
+#define BUZZER_PIN 6      
+#define FAN_RELAY_PIN 7    
+//***************************************************************
+
+#include <DHT.h>     
+#define DHT_TYPE DHT11  
+#define DHT_PIN A4 
+DHT dht(DHT_PIN, DHT_TYPE);
+int temp,hm;
+//***************************************************************
+LiquidCrystal lcd(8, 9, 10, 11, 12, 13);
+
+int gasThreshold = 300;
+//****************************************************************************************
+#include <SoftwareSerial.h>
+SoftwareSerial esp(3,2);
+
+
+//*****************************************************************************************
+
+
+#include "HX711.h"
+
+// HX711 circuit wiring
+const int LOADCELL_DOUT_PIN = A1;
+const int LOADCELL_SCK_PIN =A2;
+HX711 scale;
+long data;
+
+
+//************************************************************************************************
+
+#define DEBUG true
+#define IP "184.106.153.149"// thingspeak.com ip
+//String Api_key = "GET /update?key=B2OGXMH4YHFOSR6V"; //change it with your api key like "GET /update?key=Your Api Key
+String Api_key = "GET /update?key=B6ZYI45W0GX6UTTC";
+int err;
+long writingTimer = 15; //server response time in sec
+long startTime = 0;
+long waitTime = 0;
+
+//***************************************************
+#include <Servo.h>
+
+Servo myservo; 
+
+int a;
+int st;
+//*********************************
+
+void setup() {
+
+
+lcd.print(" LPG Detection");
+delay(2000);
+ 
+pinMode(MQ6_PIN, INPUT);
+pinMode(BUZZER_PIN, OUTPUT);
+pinMode(FAN_RELAY_PIN, OUTPUT);
+digitalWrite(BUZZER_PIN, LOW);
+digitalWrite(FAN_RELAY_PIN, LOW);
+
+
+myservo.attach(5);
+
+
+}
+
+void sendSMSAlert() {
+Serial.println("AT"); 
+delay(1000);
+Serial.println("AT+CMGF=1"); 
+delay(1000);
+//Serial.println("AT+CMGS=\"+918788414717\""); 
+Serial.println("AT+CMGS=\"+918421318898\""); 
+delay(1000);
+Serial.println("LPG Leak Detected! Take Immediate Action."); 
+
+}
+void sendSMSAlert1() {
+Serial.println("AT"); 
+delay(1000);
+Serial.println("AT+CMGF=1"); 
+delay(1000);
+Serial.println("AT+CMGS=\"+918421318898\""); 
+delay(1000);
+Serial.println("LPG Gas level Low. Gas:"+String(data)); 
+
+st=1;
+}
+void loop() {  
+
+temp = dht.readTemperature();
+hm = dht.readHumidity();
+lcd.clear();
+lcd.setCursor(0, 0);
+lcd.print("   Welcome  ");
+
+if (scale.is_ready()) {
+    long reading = scale.read();
+     data=reading-561;
+    data=data/100;
+    
+    Serial.print("HX711 reading : ");
+    Serial.println(reading);
+     Serial.print("HX711 wt : ");
+    Serial.println(data);
+  } else {
+
+    Serial.println("HX711 not found.");
+
+  }
+if(data<500){
+  if(st=0){
+lcd.clear();
+lcd.setCursor(0, 0);
+lcd.print("LoW Gas level ");
+sendSMSAlert1();
+  }
+}
+lcd.clear();
+lcd.setCursor(0, 0);
+lcd.print("Temp: ");
+lcd.print(temp);
+lcd.print(" Hm: ");
+lcd.print(hm);
+lcd.setCursor(0, 1);
+lcd.print("LPG_grm: ");
+lcd.print(data);
+
+
+if (digitalRead(A0)==0) {
+lcd.clear();
+
+
+lcd.print("Gas Leak Detected");
+digitalWrite(BUZZER_PIN, HIGH);
+digitalWrite(FAN_RELAY_PIN, HIGH); 
+myservo.write(90);
+sendSMSAlert();
+delay(2000);
+
+}
+
+else {
+myservo.write(0);
+delay(100);
+digitalWrite(BUZZER_PIN, LOW);
+digitalWrite(FAN_RELAY_PIN, LOW); // Turn off the fan
+
+}
+delay(1000);
+
+ 
+err = 0;
+  waitTime = millis() - startTime;
+
+  if (waitTime > (writingTimer * 1000))
+  {
+    a=digitalRead(A0);
+    if(a==0){
+      a=1;
+    }
+    else{
+      a=0;
+    }
+
+     updatedata();
+    //if (err==1){
+    // goto start; //go to label "start"
+    //}
+
+    startTime = millis();
+   
+  }
+
+
+
+}
+
+void updatedata() {
+
+  String command = "AT+CIPSTART=\"TCP\",\"";
+  command += IP;
+  command += "\",80";
+  //Serial.println(command);
+  esp.println(command);
+
+  delay(500);
+  if (esp.find("err")) {
+    // if (Serial.find("err")) {
+    return;
+
+  }
+
+  command = Api_key ;
+  command += "&field1=";
+  command += temp;
+  command += "&field2=";
+  command += hm ;
+  command += "&field3=";
+  command += data;
+  command += "&field4=";
+  command += a;
+
+  command += "\r\n";
+  // Serial.print("AT+CIPSEND=");
+  esp.print("AT+CIPSEND=");
+  // Serial.println(command.length());
+  esp.println(command.length());
+  if (esp.find(">")) {
+
+    // Serial.print(command);
+    esp.print(command);
+  }
+  else {
+
+    Serial.println("AT+CIPCLOSE");
+    esp.println("AT+CIPCLOSE");
+    //Resend...
+    err = 1;
+
+  }
+}
+
+String send_command(String command, const int timeout, boolean debug)
+{
+  String response = "";
+  esp.print(command);
+  Serial.print(command);
+  long int time = millis();
+  while ( (time + timeout) > millis())
+  {
+    while (esp.available())
+      //while (Serial.available())
+    {
+    }
+  }
+  if (debug)
+  {
+    Serial.print(response);
+  }
+ 
+}
